@@ -116,7 +116,7 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() noexcept
     if (zydis_disassemble(dwm_client_startup, callback) != DisassembleStatus::kSuccess || !ctx.dm_instance)
         return {};
 
-    return { ctx.dm_instance - (uint64_t)udwm_dll };
+    return { ctx.dm_instance - reinterpret_cast<uint64_t *>(udwm_dll) };
 }
 
 std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
@@ -129,7 +129,7 @@ std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name
             do {
                 if (module_name == entry.szModule) {
                     CloseHandle(snapshot);
-                    return { (uint64_t)entry.modBaseAddr };
+                    return { reinterpret_cast<uint64_t>(entry.modBaseAddr) };
                 }
             } while (Module32Next(snapshot, &entry));
         }
@@ -176,7 +176,7 @@ int main() try
     if (!dwm_process)
         throw std::runtime_error(std::format("Failed to open dwm.exe process, status: {:#x}!", GetLastError()));
 
-    std::cout << std::format("Opened process handle {:#x} to dwm.exe.\nLocating CDesktopManager *g_pdmInstance:\n", (uint64_t)dwm_process);
+    std::cout << std::format("Opened process handle {:#x} to dwm.exe.\nLocating CDesktopManager *g_pdmInstance:\n", reinterpret_cast<uint64_t>(dwm_process));
 
     zydis_init();
 
