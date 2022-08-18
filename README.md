@@ -1,7 +1,7 @@
 # win11-toggle-rounded-corners
-A simple utility that does **NOT** patch dwm (uDWM.dll) in order to disable window rounded corners on Windows 11
+A simple utility to disable window rounded corners on Windows 11
 
-No system files are being replaced so you **won't** brick your system. All this tool really does is setting a bool inside the heap of the Desktop Window Manager (DWM) or to be more precise inside the `udwm.dll`s singleton instance of `CDesktopManager`.
+No system files are being replaced. All this tool really does is setting a bool inside the heap of the Desktop Window Manager (DWM) or to be more precise inside the `udwm.dll`s singleton instance of `CDesktopManager`.
 
 **Demonstration**  
 <br><img src="https://i.imgur.com/u2HnnAL.gif">  
