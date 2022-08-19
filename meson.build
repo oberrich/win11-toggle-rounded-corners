@@ -17,8 +17,10 @@ zydis_opts.add_cmake_defines({'ZYDIS_BUILD_TOOLS': false, 'ZYDIS_BUILD_EXAMPLES'
 
 cc = meson.get_compiler('c')
 if cc.get_id() == 'msvc'
-  zydis_opts.append_compile_args(['c', 'cpp'], ['/MT', '/DEBUG:NONE'])
-  zydis_opts.append_link_args(['c', 'cpp'], ['/EMITPOGOPHASEINFO', '/ASSEMBLYDEBUG:DISABLE'])
+  zydis_opts.append_compile_args('c', ['/MT', '/DEBUG:NONE'])
+  zydis_opts.append_compile_args('cpp', ['/MT', '/DEBUG:NONE'])
+  zydis_opts.append_link_args('c', ['/EMITPOGOPHASEINFO', '/DEBUG:NONE', '/ASSEMBLYDEBUG:DISABLE', '/OPT:NOREF', '/LTCG'])
+  zydis_opts.append_link_args('cpp', ['/EMITPOGOPHASEINFO', '/DEBUG:NONE', '/ASSEMBLYDEBUG:DISABLE', '/OPT:NOREF', '/LTCG'])
 endif
  
 zydis_proj = cmake.subproject('zydis', options : zydis_opts)
