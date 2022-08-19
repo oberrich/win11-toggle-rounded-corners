@@ -5,6 +5,7 @@ No system files are being replaced. All this tool really does is setting a bool 
 
 **Demonstration**  
 <br><img src="https://i.imgur.com/u2HnnAL.gif">  
+*Tested on Windows 11 Insider Preview 25182.1000 (rs_prerelease)*
 
 **Download**  
 
