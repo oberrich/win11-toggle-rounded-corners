@@ -199,7 +199,7 @@ int main() try
         throw std::runtime_error(std::format("Failed to read value of g_pdmInstance from dwm.exe , status: {:#x}.\n", GetLastError()));
 
     auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
-    std::cout << std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst);
+    std::cout << std::format("  *g_pdmInstance == (CDesktopManager &){:#x};\n\n", desktop_manager_inst);
 
     bool enable_sharp_corners = true;
     out_size = {};
