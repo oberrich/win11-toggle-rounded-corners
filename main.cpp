@@ -26,7 +26,7 @@ enum class DisassembleStatus
     kZydisError
 };
 
-using DisassembleCallbackT = DisassembleStatus(ZydisDecodedInstruction &, ZydisDecodedOperand *, uint64_t &);
+using DisassembleCallbackT = DisassembleStatus(ZydisDecodedInstruction const &, ZydisDecodedOperand const *, uint64_t &);
 
 ZydisDecoder decoder;
 ZydisFormatter formatter;
@@ -46,7 +46,7 @@ void zydis_print_instrn(ZydisDecodedInstruction const &instrn, ZydisDecodedOpera
     puts(buffer);
 }
 
-DisassembleStatus zydis_disassemble(uint64_t address, const std::function<DisassembleCallbackT> &callback) noexcept
+DisassembleStatus zydis_disassemble(uint64_t address, std::function<DisassembleCallbackT> const &callback) noexcept
 {
     CALLBACK_ASSERT(address != 0);
 
@@ -116,7 +116,7 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() noexcept
     if (zydis_disassemble(dwm_client_startup, callback) != DisassembleStatus::kSuccess || !ctx.dm_instance)
         return {};
 
-    return { ctx.dm_instance - reinterpret_cast<uint64_t *>(udwm_dll) };
+    return { ctx.dm_instance - reinterpret_cast<uint64_t>(udwm_dll) };
 }
 
 std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
