@@ -11,7 +11,7 @@ No system files are being replaced. All this tool really does is setting a bool 
 
 Precompiled binaries are available [**here**](https://github.com/oberrich/win11-toggle-rounded-corners/releases) *(Some Anti-Virus products may block the access to `dwm.exe` in which case you have to disable them temporarily)*.  
 
-To permanently disable rounded corners put the app into your auto-start (Task Manager > Startup apps > Run new task > `path/to/win11-toggle-rounded-edges.exe`).  
+To permanently disable rounded corners put the app into your auto-start.  
 
 **Build**  
 
