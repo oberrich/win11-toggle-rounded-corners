@@ -303,8 +303,8 @@ int main() try
   ProgramOptions const options{
       constexpr Option{L"autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
       constexpr Option{L"verbose"sv, L"Enables verbose output."sv},
-      constexpr Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable."},
-      constexpr Option{L"enable"sv, L"Always enables rounded corners."}
+      constexpr Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable."sv},
+      constexpr Option{L"enable"sv, L"Always enables rounded corners."sv}
   };
 
   set_verbose(options[L"verbose"sv].value);
