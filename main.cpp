@@ -25,27 +25,39 @@ struct Option {
   bool value;
 };
 
+namespace detail {
+using namespace std::string_view_literals;
+static constexpr Option help_option{L"help"sv, L"Shows all available options."sv};
+}
+
 template <std::size_t N>
 struct ProgramOptions {
-  ProgramOptions(auto &&...opts)
+
+  ProgramOptions(auto&&...opts)
     : argc{0}
     , argv{const_cast<decltype(argv)>(CommandLineToArgvW(GetCommandLineW(), &argc))}
     , command{argv[0]}
-    , options{std::array{Option{L"help", L"Shows all available options."}, std::forward<decltype(opts)>(opts)...}}
+    , program_name{command.substr(std::size(command) - std::ranges::distance(command
+                     | std::views::reverse
+                     | std::views::take_while(
+                         [](auto const c) constexpr noexcept { return c != L'/' && c != L'\\'; })))}
+    , options{std::array{detail::help_option, std::forward<decltype(opts)>(opts)...}}
   {
-    constexpr auto wrap_sv_trim = [](auto const *str) constexpr noexcept {
-      std::wstring_view sv{str};
-      sv.remove_prefix((std::min)(sv.find_first_not_of(L'-'), std::size(sv)));
-      return sv;
+    using namespace std::string_view_literals;
+
+    constexpr auto trim_and_wrap = [](wchar_t const *str) constexpr noexcept -> std::wstring_view {
+      return static_cast<std::wstring_view>(str) | std::views::drop_while(
+                                                     [](auto const c) constexpr noexcept { return c == L'-'; });
     };
 
-    for (auto const arg : std::span{argv + 1, argv + argc} | std::views::transform(wrap_sv_trim)) {
-      for (auto &option : options)
+    for (auto const arg : std::span{argv + 1, argv + argc} | std::views::transform(trim_and_wrap)) {
+      for (auto &option : options) {
         if (option.name == arg)
           option.value = true;
+      }
     }
 
-    if (decltype(auto) self = std::as_const(*this); self[L"help"].value)
+    if (decltype(auto) self = std::as_const(*this); self[L"help"sv].value)
       print_help();
   }
 
@@ -62,28 +74,29 @@ struct ProgramOptions {
   constexpr Option const &operator[](std::wstring_view name) const { return get<Option const>(name).value().get(); }
 
   void print_help() const noexcept {
-    constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"};
-    constexpr std::wstring_view program_name{L"win11-toggle-rounded-corners.exe"};
-    constexpr std::wstring_view author{L"oberrich"};
-    constexpr std::wstring_view version{L"v1.1"};
-    constexpr std::wstring_view copyright_year{L"2022"};
+    using namespace std::string_view_literals;
 
-    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}\n\n{} [options]\nOptions:\n",
+    constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
+    constexpr std::wstring_view author               {L"oberrich"sv};
+    constexpr std::wstring_view version              {L"v1.1"sv};
+    constexpr std::wstring_view copyright_year       {L"2022"sv};
+
+    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}\n\n{} [options]\nOptions:\n"sv,
                               program_name_friendly, version, copyright_year, author, program_name);
 
     for (auto const &option : options)
-      std::wcout << std::format(L"  --{: <20}: {}\n", option.name, option.desc);
+      std::wcout << std::format(L"  --{: <20}: {}\n"sv, option.name, option.desc);
   }
 
   int argc;
   wchar_t const **argv;
-  std::wstring_view const command;
+  std::wstring_view command;
+  std::wstring_view program_name;
   std::array<Option, N> options;
 };
 
 template <typename... Options>
 ProgramOptions(Options...) -> ProgramOptions<sizeof...(Options) + 1>;
-
 
 enum class DisassembleStatus {
   kContinue,
@@ -186,7 +199,7 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() noexcept
     if (zydis_disassemble(dwm_client_startup, callback) != DisassembleStatus::kSuccess || !ctx.dm_instance)
         return {};
 
-    return ctx.dm_instance - reinterpret_cast<uint64_t>(udwm_dll) ;
+    return static_cast<std::ptrdiff_t>(ctx.dm_instance - reinterpret_cast<uint64_t>(udwm_dll));
 }
 
 std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
@@ -232,7 +245,9 @@ bool enable_privilege(LPCTSTR name) noexcept
 
 int main() try
 {
-  ProgramOptions const options{Option{L"no-autostart", L"Disables auto-start"}};
+  using namespace std::string_view_literals;
+
+  ProgramOptions const options{Option{L"no-autostart"sv, L"Disables auto-start"sv}};
 
     if (!enable_privilege(SE_DEBUG_NAME))
         throw std::runtime_error(std::format("Failed enable {}!", SE_DEBUG_NAME));
@@ -278,9 +293,9 @@ int main() try
     if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
         std::cerr << std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError());
 
-    constexpr std::array<char const *, 2> boolean_values {
-        "disabled",
-        "enabled"
+    constexpr std::array boolean_values {
+        "disabled"sv,
+        "enabled"sv
     };
 
     std::cout << std::format("Your rounded corners were '{}', they are now being {}...\n", boolean_values[enable_sharp_corners], boolean_values[(!enable_sharp_corners)]);
