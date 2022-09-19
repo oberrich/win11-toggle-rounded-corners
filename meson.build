@@ -7,7 +7,6 @@ project('win11-toggle-rounded-corners', ['c', 'cpp'],
   	'warning_level=3',
   	'werror=true',
     'default_library=static',
-    'b_sanitize=address',
     'b_vscrt=static_from_buildtype',
   ],
   subproject_dir : 'deps')
