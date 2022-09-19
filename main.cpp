@@ -8,6 +8,7 @@
 #include <ranges>
 #include <concepts>
 #include <optional>
+#include <source_location>
 
 #include <cstdio>
 #include <cinttypes>
@@ -18,6 +19,7 @@
 #include <Zydis/Zydis.h>
 
 #include <format>
+#include <concepts>
 
 struct Option {
   std::wstring_view name;
@@ -25,14 +27,29 @@ struct Option {
   bool value;
 };
 
-namespace detail {
+namespace oberrich::detail {
 using namespace std::string_view_literals;
 static constexpr Option help_option{L"help"sv, L"Shows all available options."sv};
+
+static bool verbose_enabled{};
+}
+
+inline void set_verbose(bool enabled) noexcept {
+  oberrich::detail::verbose_enabled = enabled;
+}
+
+inline bool get_verbose() noexcept {
+  return oberrich::detail::verbose_enabled;
+}
+
+template <typename... Args>
+inline void verbose(Args&&... args) {
+  if (get_verbose())
+    (std::cout << ... << args);
 }
 
 template <std::size_t N>
 struct ProgramOptions {
-
   ProgramOptions(auto&&...opts)
     : argc{0}
     , argv{const_cast<decltype(argv)>(CommandLineToArgvW(GetCommandLineW(), &argc))}
@@ -41,13 +58,13 @@ struct ProgramOptions {
                      | std::views::reverse
                      | std::views::take_while(
                          [](auto const c) constexpr noexcept { return c != L'/' && c != L'\\'; })))}
-    , options{std::array{detail::help_option, std::forward<decltype(opts)>(opts)...}}
+    , options{std::array{oberrich::detail::help_option, std::forward<decltype(opts)>(opts)...}}
   {
     using namespace std::string_view_literals;
 
-    constexpr auto trim_and_wrap = [](wchar_t const *str) constexpr noexcept -> std::wstring_view {
-      return static_cast<std::wstring_view>(str) | std::views::drop_while(
-                                                     [](auto const c) constexpr noexcept { return c == L'-'; });
+    constexpr auto trim_and_wrap = [](std::wstring_view str) constexpr noexcept {
+      constexpr auto is_dash = [](auto const c) constexpr noexcept { return c == L'-'; };
+      return static_cast<std::wstring_view>(str | std::views::drop_while(is_dash));
     };
 
     for (auto const arg : std::span{argv + 1, argv + argc} | std::views::transform(trim_and_wrap)) {
@@ -63,8 +80,8 @@ struct ProgramOptions {
 
   template <typename ValT>
   constexpr std::optional<std::reference_wrapper<ValT>> get(std::wstring_view name) const {
-    if (auto result = std::ranges::find_if(options, [name](auto const &option) constexpr {
-              return option.name == name; });
+    if (auto result = std::ranges::find_if(options, [name](auto const &option) constexpr noexcept {
+                        return option.name == name; });
         result != std::end(options))
       return {*result};
     return {};
@@ -73,7 +90,7 @@ struct ProgramOptions {
   constexpr Option       &operator[](std::wstring_view name)       { return get<Option      >(name).value().get(); }
   constexpr Option const &operator[](std::wstring_view name) const { return get<Option const>(name).value().get(); }
 
-  void print_help() const noexcept {
+  void print_help() const {
     using namespace std::string_view_literals;
 
     constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
@@ -98,55 +115,87 @@ struct ProgramOptions {
 template <typename... Options>
 ProgramOptions(Options...) -> ProgramOptions<sizeof...(Options) + 1>;
 
-enum class DisassembleStatus {
-  kContinue,
-  kFailed,
-  kSuccess,
-  kFollow,
-  kZydisError
+namespace detail {
+static inline bool enforce_status(ZyanStatus status, const std::source_location location = std::source_location::current()) {
+  if (ZYAN_FAILED(status))
+    throw std::runtime_error(std::format("{}({}): assertion failed with status {:#x}",
+                                         location.file_name(), location.line(), status));
+  return true;
+}
+}
+
+enum struct DecoderStatus : bool {
+  kDone = false,
+  kNext = true
 };
 
-using DisassembleCallbackT = DisassembleStatus(ZydisDecodedInstruction const &, ZydisDecodedOperand const *, uint64_t &);
+struct Instruction : ZydisDecodedInstruction {
+  DecoderStatus follow() {
+    if (ZyanU64 target{ calc_abs() })
+      address = target - length;
+    else
+      detail::enforce_status(ZYAN_STATUS_INVALID_ARGUMENT);
 
-ZydisDecoder decoder;
-ZydisFormatter formatter;
+    return DecoderStatus::kNext;
+  }
 
-void zydis_init()
-{
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64);
-    ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL);
-    ZydisFormatterSetProperty(&formatter, ZYDIS_FORMATTER_PROP_IMM_SIGNEDNESS, ZYDIS_SIGNEDNESS_AUTO);
-}
+  ZyanU64 calc_abs(std::size_t n = 0u) {
+    if (n >= ZYDIS_MAX_OPERAND_COUNT_VISIBLE)
+      detail::enforce_status(ZYAN_STATUS_INVALID_ARGUMENT);
 
-void zydis_print_instrn(ZydisDecodedInstruction const &instrn, ZydisDecodedOperand const *operands, uint64_t address) noexcept
-{
-    printf("  %016" PRIX64 "  ", address);
-    char buffer[256];
-    ZydisFormatterFormatInstruction(&formatter, &instrn, operands, instrn.operand_count_visible, buffer, sizeof(buffer), address, ZYAN_NULL);
-    puts(buffer);
-}
+    ZyanU64 absolute{};
+    detail::enforce_status(ZydisCalcAbsoluteAddress(this, &operands[n], address, &absolute));
+    return absolute;
+  };
 
-DisassembleStatus zydis_disassemble(uint64_t address, std::function<DisassembleCallbackT> const &callback) noexcept
-{
-    if (!address) return DisassembleStatus::kFailed;
+  ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT_VISIBLE];
+  ZyanU64 address;
+};
 
-    ZydisDecodedInstruction instrn{};
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT_VISIBLE];
+struct Decoder : ZydisDecoder {
+  Decoder() {
+    detail::enforce_status(ZydisDecoderInit(this, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64));
+  }
 
-    while (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, reinterpret_cast<void const *>(address), 32, &instrn, operands, ZYDIS_MAX_OPERAND_COUNT_VISIBLE, ZYDIS_DFLAG_VISIBLE_OPERANDS_ONLY))) {
-        if (auto status = callback(instrn, operands, address); status != DisassembleStatus::kContinue) {
-            if (status == DisassembleStatus::kFollow) {
-                if (!ZydisCalcAbsoluteAddress(&instrn, operands, address, &address))
-                    return DisassembleStatus::kFailed;
-                continue;
-            }
-            return status;
-        }
-        address += instrn.length;
+  template <typename T = void>
+  void disassemble(ZyanU64 address, std::invocable<Instruction &> auto &&callback) {
+    Instruction instrn{};
+    instrn.address = address;
+
+    while (detail::enforce_status(ZydisDecoderDecodeFull(this, reinterpret_cast<ZyanU8 const *>(instrn.address), 32, &instrn, instrn.operands,
+                                                         ZYDIS_MAX_OPERAND_COUNT_VISIBLE, ZYDIS_DFLAG_VISIBLE_OPERANDS_ONLY))) {
+      if (callback(instrn) == DecoderStatus::kDone)
+        return;
+
+      instrn.address += instrn.length;
     }
+  }
+};
 
-    return DisassembleStatus::kZydisError;
-}
+struct Formatter : ZydisFormatter {
+  Formatter() noexcept {
+    detail::enforce_status(ZydisFormatterInit(this, ZYDIS_FORMATTER_STYLE_INTEL));
+    detail::enforce_status(ZydisFormatterSetProperty(this, ZYDIS_FORMATTER_PROP_IMM_SIGNEDNESS, ZYDIS_SIGNEDNESS_AUTO));
+  }
+
+  std::string_view operator()(ZydisInstructionCategory const category)  const noexcept { return { ZydisCategoryGetString(category)  }; }
+  std::string_view operator()(ZydisRegister            const register_) const noexcept { return { ZydisRegisterGetString(register_) }; }
+  std::string_view operator()(ZydisMnemonic            const mnemonic)  const noexcept { return { ZydisMnemonicGetString(mnemonic)  }; }
+  std::string_view operator()(ZydisISASet              const isa_set)   const noexcept { return { ZydisISASetGetString(isa_set)     }; }
+  std::string_view operator()(ZydisISAExt              const isa_ext)   const noexcept { return { ZydisISAExtGetString(isa_ext)     }; }
+
+  std::string operator()(ZydisDecodedInstruction const &instrn, ZydisDecodedOperand const *operands, ZyanU64 const address) const {
+    static auto constexpr kMaxChars = 256;
+    auto buffer = std::make_unique<char []>(kMaxChars);
+    ZydisFormatterFormatInstruction(this, &instrn, operands, instrn.operand_count_visible, buffer.get(), kMaxChars, address,
+                                    ZYAN_NULL);
+    return std::format("  {:#x}: {}", address, buffer.get());
+  }
+
+  std::string operator()(Instruction const &instrn) const {
+    return (*this)(instrn, instrn.operands, instrn.address);
+  }
+};
 
 struct desktop_manager_proto
 {
@@ -160,7 +209,7 @@ struct desktop_manager_proto
 static_assert(offsetof(desktop_manager_proto, enable_rounded_corners) == 0x1C,
               "alignment issues (wrong arch)");
 
-std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() noexcept
+std::optional<std::ptrdiff_t> locate_udwm_desktop_manager()
 {
     auto const udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
     if (!udwm_dll)
@@ -170,36 +219,38 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() noexcept
     if (!dwm_client_startup)
         return {};
 
-    struct Context {
-        uint64_t dm_instance;
-        bool found_dm_create;
+    struct DynamicData {
+      ZyanU64 instance{};
+      bool found_create{};
     };
+    DynamicData dyn_data{};
 
-    Context ctx{};
-    auto callback = [&ctx](auto const &instrn, auto const operands, auto &address) noexcept -> DisassembleStatus {
-        if (instrn.mnemonic == ZYDIS_MNEMONIC_RET)
-            return DisassembleStatus::kFailed;
+    Formatter formatter{};
+    Decoder decoder{};
+    decoder.disassemble(dwm_client_startup, [&formatter, &dyn_data](Instruction &instrn) {
+      if (instrn.mnemonic == ZYDIS_MNEMONIC_RET)
+        throw std::out_of_range("Failed to disasm: Reached end of function");
 
-        zydis_print_instrn(instrn, operands, address);
+      verbose(formatter(instrn), '\n');
 
-        if (!ctx.found_dm_create && instrn.mnemonic == ZYDIS_MNEMONIC_CALL) {
-            ctx.found_dm_create = true;
-            return DisassembleStatus::kFollow;
-        }
+      if (!dyn_data.found_create && instrn.mnemonic == ZYDIS_MNEMONIC_CALL) {
+        dyn_data.found_create = true;
+        return instrn.follow();
+      }
 
-        auto const &lhs = operands[0];
-        if (instrn.mnemonic == ZYDIS_MNEMONIC_MOV && lhs.type == ZYDIS_OPERAND_TYPE_MEMORY && lhs.mem.segment == ZYDIS_REGISTER_DS) {
-            ZydisCalcAbsoluteAddress(&instrn, operands, address, &ctx.dm_instance);
-            return DisassembleStatus::kSuccess;
-        }
+      if (auto const &op0 = instrn.operands[0];
+          instrn.mnemonic == ZYDIS_MNEMONIC_MOV && op0.type == ZYDIS_OPERAND_TYPE_MEMORY && op0.mem.segment == ZYDIS_REGISTER_DS) {
+        dyn_data.instance = instrn.calc_abs();
+        return DecoderStatus::kDone;
+      }
 
-        return DisassembleStatus::kContinue;
-    };
+      return DecoderStatus::kNext;
+    });
 
-    if (zydis_disassemble(dwm_client_startup, callback) != DisassembleStatus::kSuccess || !ctx.dm_instance)
-        return {};
+    if (!dyn_data.instance || !dyn_data.found_create)
+      return {};
 
-    return static_cast<std::ptrdiff_t>(ctx.dm_instance - reinterpret_cast<uint64_t>(udwm_dll));
+    return static_cast<std::ptrdiff_t>(dyn_data.instance - reinterpret_cast<ZyanU64>(udwm_dll));
 }
 
 std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
@@ -247,59 +298,63 @@ int main() try
 {
   using namespace std::string_view_literals;
 
-  ProgramOptions const options{Option{L"no-autostart"sv, L"Disables auto-start"sv}};
+  ProgramOptions const options{
+      constexpr Option{L"no-autostart"sv, L"Disables auto-start."sv},
+      constexpr Option{L"verbose"sv, L"Enables verbose output."sv},
+  };
 
-    if (!enable_privilege(SE_DEBUG_NAME))
-        throw std::runtime_error(std::format("Failed enable {}!", SE_DEBUG_NAME));
+  set_verbose(options[L"verbose"sv].value);
 
-    auto const dwm_hwnd = FindWindowA("Dwm", nullptr);
-    DWORD dwm_pid = 0u;
-    if (!dwm_hwnd || !GetWindowThreadProcessId(dwm_hwnd, &dwm_pid))
-        throw std::runtime_error("Failed to find dwm process.\n");
+  if (!enable_privilege(SE_DEBUG_NAME))
+    throw std::runtime_error(std::format("Failed enable {}!", SE_DEBUG_NAME));
 
-    std::cout << std::format("Found dwm.exe process [window handle: {}, pid: {}].\n", static_cast<void *>(dwm_hwnd), dwm_pid);
+  auto const dwm_hwnd = FindWindowA("Dwm", nullptr);
+  DWORD dwm_pid = 0u;
 
-    auto const dwm_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwm_pid);
-    if (!dwm_process)
-        throw std::runtime_error(std::format("Failed to open dwm.exe process, status: {:#x}!", GetLastError()));
+  if (!dwm_hwnd || !GetWindowThreadProcessId(dwm_hwnd, &dwm_pid))
+    throw std::runtime_error("Failed to find dwm process.\n");
 
-    std::cout << std::format("Opened process handle {:#x} to dwm.exe.\nLocating CDesktopManager *g_pdmInstance:\n", reinterpret_cast<uint64_t>(dwm_process));
+  verbose(std::format("Found dwm.exe process [window handle: {}, pid: {}].\n", static_cast<void *>(dwm_hwnd), dwm_pid));
 
-    zydis_init();
+  auto const dwm_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwm_pid);
+  if (!dwm_process)
+    throw std::runtime_error(std::format("Failed to open dwm.exe process, status: {:#x}!", GetLastError()));
 
-    auto const desktop_manager_rva = locate_udwm_desktop_manager();
-    if (!desktop_manager_rva)
-        throw std::runtime_error("Failed to locate g_pdmInstance RVA inside udwm.dll.");
+  verbose(std::format("Opened process handle {:#x} to dwm.exe.\nLocating CDesktopManager *g_pdmInstance:\n", reinterpret_cast<uint64_t>(dwm_process)));
 
-    std::cout << std::format("Found g_pdmInstance at RVA {:#x}.\n", desktop_manager_rva.value());
+  auto const desktop_manager_rva = locate_udwm_desktop_manager();
+  if (!desktop_manager_rva)
+    throw std::runtime_error("Failed to locate g_pdmInstance RVA inside udwm.dll.");
 
-    auto const dwm_base = find_module_base(dwm_pid, std::string_view{"udwm.dll"});
-    if (!dwm_base)
-        throw std::runtime_error("Failed to find udwm.dll module inside dwm.exe process!");
+  verbose(std::format("Found g_pdmInstance at RVA {:#x}.\n", desktop_manager_rva.value()));
 
-    std::cout << std::format("Found udwm.dll mapped at {:#x}.\n", dwm_base.value());
+  auto const dwm_base = find_module_base(dwm_pid, std::string_view{"udwm.dll"});
+  if (!dwm_base)
+    throw std::runtime_error("Failed to find udwm.dll module inside dwm.exe process!");
 
-    auto desktop_manager_ptr = reinterpret_cast<void const *>(dwm_base.value() + desktop_manager_rva.value());
-    uint64_t desktop_manager_inst{};
-    SIZE_T out_size{};
-    if (!ReadProcessMemory(dwm_process, desktop_manager_ptr, &desktop_manager_inst, sizeof(void *), &out_size) || !desktop_manager_inst)
-        throw std::runtime_error(std::format("Failed to read value of g_pdmInstance from dwm.exe , status: {:#x}.\n", GetLastError()));
+  verbose(std::format("Found udwm.dll mapped at {:#x}.\n", dwm_base.value()));
 
-    auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
-    std::cout << std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst);
+  auto desktop_manager_ptr = reinterpret_cast<void const *>(dwm_base.value() + desktop_manager_rva.value());
+  uint64_t desktop_manager_inst{};
+  SIZE_T out_size{};
+  if (!ReadProcessMemory(dwm_process, desktop_manager_ptr, &desktop_manager_inst, sizeof(void *), &out_size) || !desktop_manager_inst)
+    throw std::runtime_error(std::format("Failed to read value of g_pdmInstance from dwm.exe , status: {:#x}.\n", GetLastError()));
 
-    bool enable_sharp_corners = true;
-    out_size = {};
-    if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
-        std::cerr << std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError());
+  auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
+  verbose(std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst));
 
-    constexpr std::array boolean_values {
-        "disabled"sv,
-        "enabled"sv
-    };
+  bool enable_sharp_corners = true;
+  out_size = {};
+  if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
+    throw std::runtime_error(std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError()));
 
-    std::cout << std::format("Your rounded corners were '{}', they are now being {}...\n", boolean_values[enable_sharp_corners], boolean_values[(!enable_sharp_corners)]);
-    enable_sharp_corners ^= true;
+  constexpr std::array boolean_values {
+      "disabled"sv,
+      "enabled"sv
+  };
+
+  std::cout << std::format("Your rounded corners were '{}', they are now being {}...\n", boolean_values[enable_sharp_corners], boolean_values[(!enable_sharp_corners)]);
+  enable_sharp_corners ^= true;
 
     out_size = {};
     if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
