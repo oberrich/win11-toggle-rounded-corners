@@ -74,6 +74,13 @@ struct ProgramOptions {
       }
     }
 
+    constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
+    constexpr std::wstring_view author               {L"oberrich"sv};
+    constexpr std::wstring_view version              {L"v1.1"sv};
+    constexpr std::wstring_view copyright_year       {L"2022"sv};
+
+    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}\n\n"sv, program_name_friendly, version, copyright_year, author);
+
     if (decltype(auto) self = std::as_const(*this); self[L"help"sv].value)
       print_help();
   }
@@ -92,17 +99,12 @@ struct ProgramOptions {
 
   void print_help() const {
     using namespace std::string_view_literals;
-
-    constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
-    constexpr std::wstring_view author               {L"oberrich"sv};
-    constexpr std::wstring_view version              {L"v1.1"sv};
-    constexpr std::wstring_view copyright_year       {L"2022"sv};
-
-    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}\n\n{} [options]\nOptions:\n"sv,
-                              program_name_friendly, version, copyright_year, author, program_name);
+    std::wcout << std::format(L"{} [options]\nOptions:\n"sv, program_name);
 
     for (auto const &option : options)
       std::wcout << std::format(L"  --{: <20}: {}\n"sv, option.name, option.desc);
+
+    std::exit(0);
   }
 
   int argc;
@@ -299,14 +301,19 @@ int main() try
   using namespace std::string_view_literals;
 
   ProgramOptions const options{
-      constexpr Option{L"no-autostart"sv, L"Disables auto-start."sv},
+      constexpr Option{L"autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
       constexpr Option{L"verbose"sv, L"Enables verbose output."sv},
+      constexpr Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable. NOT IMPLEMENTED"},
+      constexpr Option{L"enable"sv, L"Always enables rounded corners. NOT IMPLEMENTED"}
   };
 
   set_verbose(options[L"verbose"sv].value);
 
+  auto should_disable = options[L"disable"sv].value;
+  auto should_override_toggle = should_disable || options[L"enable"sv].value;
+
   if (!enable_privilege(SE_DEBUG_NAME))
-    throw std::runtime_error(std::format("Failed enable {}!", SE_DEBUG_NAME));
+    throw std::runtime_error(std::format("Failed enable {}, make sure you are running as admin.", SE_DEBUG_NAME));
 
   auto const dwm_hwnd = FindWindowA("Dwm", nullptr);
   DWORD dwm_pid = 0u;
@@ -343,29 +350,30 @@ int main() try
   auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
   verbose(std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst));
 
-  bool enable_sharp_corners = true;
-  out_size = {};
-  if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
-    throw std::runtime_error(std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError()));
+  constexpr std::array boolean_values { "enabled"sv, "disabled"sv };
 
-  constexpr std::array boolean_values {
-      "disabled"sv,
-      "enabled"sv
-  };
-
-  std::cout << std::format("Your rounded corners were '{}', they are now being {}...\n", boolean_values[enable_sharp_corners], boolean_values[(!enable_sharp_corners)]);
-  enable_sharp_corners ^= true;
-
+  if (!should_override_toggle) {
     out_size = {};
-    if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &enable_sharp_corners, 1, &out_size) || out_size != 1)
-        throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
+    if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
+      throw std::runtime_error(std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError()));
 
-    std::cout << "Success!";
+    std::cout << std::format("Your rounded corners were '{}', they are now being {}... ",
+                             boolean_values[should_disable], boolean_values[(!should_disable)]);
+    should_disable ^= true;
+  } else {
+    std::cout << std::format("Your rounded corners are being {}... ", boolean_values[should_disable]);
+  }
 
-    if (enable_sharp_corners)
-        std::cout << " Your Windows 11 experience is now enhanced!\n";
+  out_size = {};
+  if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
+    throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
 
-    return 0;
+  std::cout << "Success!\n";
+
+  if (should_disable)
+    std::cout << "Your Windows 11 experience is now enhanced!\n";
+
+  return 0;
 } catch (std::exception const &e) {
     std::cerr << e.what() << '\n';
     return 1;
