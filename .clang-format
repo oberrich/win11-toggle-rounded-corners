@@ -4,7 +4,7 @@ BasedOnStyle: Google
 Standard: Latest
 UseTab: Never
 TabWidth: 2
-ColumnLimit: 120
+ColumnLimit: 140
 DerivePointerAlignment: false
 PointerAlignment: Right # auto &ref, auto *ptr
 QualifierAlignment: Right # auto const
