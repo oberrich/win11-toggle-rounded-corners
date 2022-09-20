@@ -74,11 +74,12 @@ struct ProgramOptions {
     }
 
     constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
-    constexpr std::wstring_view author               {L"oberrich"sv};
     constexpr std::wstring_view version              {L"v1.1"sv};
+    constexpr std::wstring_view license              {L"MIT License"};
     constexpr std::wstring_view copyright_year       {L"2022"sv};
+    constexpr std::wstring_view author               {L"oberrich"sv};
 
-    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}\n\n"sv, program_name_friendly, version, copyright_year, author);
+    std::wcout << std::format(L"{} {}\nCopyright (C) {} {}, {}\n\n"sv, program_name_friendly, version, copyright_year, author, license);
 
     if (decltype(auto) self = std::as_const(*this); self[L"help"sv].value)
       print_help();
