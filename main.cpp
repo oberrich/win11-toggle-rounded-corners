@@ -187,8 +187,7 @@ struct Formatter : ZydisFormatter {
   std::string operator()(ZydisDecodedInstruction const &instrn, ZydisDecodedOperand const *operands, ZyanU64 const address) const {
     static auto constexpr kMaxChars = 256;
     auto buffer = std::make_unique<char []>(kMaxChars);
-    ZydisFormatterFormatInstruction(this, &instrn, operands, instrn.operand_count_visible, buffer.get(), kMaxChars, address,
-                                    ZYAN_NULL);
+    ZydisFormatterFormatInstruction(this, &instrn, operands, instrn.operand_count_visible, buffer.get(), kMaxChars, address, ZYAN_NULL);
     return std::format("  {:#x}: {}", address, buffer.get());
   }
 
@@ -197,8 +196,7 @@ struct Formatter : ZydisFormatter {
   }
 };
 
-struct desktop_manager_proto
-{
+struct desktop_manager_proto {
     void *unknown0[3];
     uint8_t unknown1[2];
     bool rounded_shadow_enabled;
@@ -206,11 +204,9 @@ struct desktop_manager_proto
     bool enable_rounded_corners;
 };
 
-static_assert(offsetof(desktop_manager_proto, enable_rounded_corners) == 0x1C,
-              "alignment issues (wrong arch)");
+static_assert(offsetof(desktop_manager_proto, enable_rounded_corners) == 0x1C, "alignment issues (wrong arch)");
 
-std::optional<std::ptrdiff_t> locate_udwm_desktop_manager()
-{
+std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() {
     auto const udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
     if (!udwm_dll)
         return {};
@@ -401,13 +397,13 @@ int main() try
   auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
 
   for (auto flt : get_section<float>(udwm_dll, ".rdata")
-                                       | std::views::filter([](auto &flt) -> bool {
-                                            return flt == 4.f || flt == 8.f; })
-                                       | std::views::transform([=](float &flt) {
-                                           auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
-                                           auto rebased = reinterpret_cast<float *>(dwm_base.value() + rva);
-                                           return rebased;
-                                         })) {
+                    | std::views::filter([](auto &flt) -> bool {
+                        return flt == 4.f || flt == 8.f; })
+                    | std::views::transform([=](float &flt) {
+                        auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
+                        auto rebased = reinterpret_cast<float *>(dwm_base.value() + rva);
+                        return rebased;
+                      })) {
     float const new_border_radius = 0.001f;
     verbose(std::format("Writing {} to border radius {:#x}\n", new_border_radius, (ZyanU64)flt));
 
