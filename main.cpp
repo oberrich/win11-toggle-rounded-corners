@@ -197,129 +197,121 @@ struct Formatter : ZydisFormatter {
 };
 
 struct desktop_manager_proto {
-    void *unknown0[3];
-    uint8_t unknown1[2];
-    bool rounded_shadow_enabled;
-    bool enable_sharp_corners;
-    bool enable_rounded_corners;
+  void *unknown0[3];
+  uint8_t unknown1[2];
+  bool rounded_shadow_enabled;
+  bool enable_sharp_corners;
+  bool enable_rounded_corners;
 };
 
 static_assert(offsetof(desktop_manager_proto, enable_rounded_corners) == 0x1C, "alignment issues (wrong arch)");
 
 std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() {
-    auto const udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    if (!udwm_dll)
-        return {};
+  auto const udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
+  if (!udwm_dll)
+    return {};
 
-    auto const dwm_client_startup = reinterpret_cast<uint64_t>(GetProcAddress(udwm_dll, MAKEINTRESOURCE(101)));
-    if (!dwm_client_startup)
-        return {};
+  auto const dwm_client_startup = reinterpret_cast<uint64_t>(GetProcAddress(udwm_dll, MAKEINTRESOURCE(101)));
+  if (!dwm_client_startup)
+    return {};
 
-    struct DynamicData {
-      ZyanU64 instance{};
-      bool found_create{};
-    };
-    DynamicData dyn_data{};
+  struct DynamicData {
+    ZyanU64 instance{};
+    bool found_create{};
+  };
+  DynamicData dyn_data{};
 
-    Formatter formatter{};
-    Decoder decoder{};
-    decoder.disassemble(dwm_client_startup, [&formatter, &dyn_data](Instruction &instrn) {
-      if (instrn.mnemonic == ZYDIS_MNEMONIC_RET)
-        throw std::out_of_range("Failed to disasm: Reached end of function");
+  Formatter formatter{};
+  Decoder decoder{};
+  decoder.disassemble(dwm_client_startup, [&formatter, &dyn_data](Instruction &instrn) {
+    if (instrn.mnemonic == ZYDIS_MNEMONIC_RET)
+      throw std::out_of_range("Failed to disasm: Reached end of function");
 
-      verbose(formatter(instrn), '\n');
+    verbose(formatter(instrn), '\n');
 
-      if (!dyn_data.found_create && instrn.mnemonic == ZYDIS_MNEMONIC_CALL) {
-        dyn_data.found_create = true;
-        return instrn.follow();
-      }
+    if (!dyn_data.found_create && instrn.mnemonic == ZYDIS_MNEMONIC_CALL) {
+      dyn_data.found_create = true;
+      return instrn.follow();
+    }
 
-      if (auto const &op0 = instrn.operands[0];
-          instrn.mnemonic == ZYDIS_MNEMONIC_MOV && op0.type == ZYDIS_OPERAND_TYPE_MEMORY && op0.mem.segment == ZYDIS_REGISTER_DS) {
-        dyn_data.instance = instrn.calc_abs();
-        return DecoderStatus::kDone;
-      }
+    if (auto const &op0 = instrn.operands[0];
+        instrn.mnemonic == ZYDIS_MNEMONIC_MOV && op0.type == ZYDIS_OPERAND_TYPE_MEMORY && op0.mem.segment == ZYDIS_REGISTER_DS) {
+      dyn_data.instance = instrn.calc_abs();
+      return DecoderStatus::kDone;
+    }
 
-      return DecoderStatus::kNext;
-    });
+    return DecoderStatus::kNext;
+  });
 
-    if (!dyn_data.instance || !dyn_data.found_create)
-      return {};
+  if (!dyn_data.instance || !dyn_data.found_create)
+    return {};
 
-    return static_cast<std::ptrdiff_t>(dyn_data.instance - reinterpret_cast<ZyanU64>(udwm_dll));
+  return static_cast<std::ptrdiff_t>(dyn_data.instance - reinterpret_cast<ZyanU64>(udwm_dll));
 }
 
-IMAGE_NT_HEADERS64 *image_nt_headers(void* base)
-{
-  if (!base)
-    return nullptr;
+IMAGE_NT_HEADERS64 *image_nt_headers(void* base) {
+  if (!base) return nullptr;
 
   auto const dos_header = static_cast<IMAGE_DOS_HEADER *>(base);
-  if (dos_header->e_magic != IMAGE_DOS_SIGNATURE)
-    return nullptr;
+  if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
 
   auto nt_headers = reinterpret_cast<IMAGE_NT_HEADERS64 *>(static_cast<std::uint8_t *>(base) + dos_header->e_lfanew);
-  if (nt_headers->Signature != IMAGE_NT_SIGNATURE)
-    return nullptr;
+  if (nt_headers->Signature != IMAGE_NT_SIGNATURE) return nullptr;
 
   return nt_headers;
 }
 
 template <typename T = uint8_t>
-std::span<T> get_section(void *base, std::string_view name)
-{
+std::span<T> get_section(void *base, std::string_view name) {
   auto const nt_hdrs = image_nt_headers(base);
 
   for (auto sec_header = IMAGE_FIRST_SECTION(nt_hdrs);
        sec_header < IMAGE_FIRST_SECTION(nt_hdrs) + nt_hdrs->FileHeader.NumberOfSections;
-       sec_header++)
-  {
+       sec_header++) {
     if (name == reinterpret_cast<char const *>(sec_header->Name)) {
-      return { reinterpret_cast<T *>(static_cast<uint8_t *>(base) + sec_header->VirtualAddress), sec_header->Misc.VirtualSize };
+      return { reinterpret_cast<T *>(static_cast<uint8_t *>(base) + sec_header->VirtualAddress), sec_header->Misc.VirtualSize / sizeof(T) };
     }
   }
-
   return {};
 }
 
-std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
-{
-    auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (snapshot != INVALID_HANDLE_VALUE) {
-        auto entry = MODULEENTRY32{ .dwSize = sizeof(MODULEENTRY32) };
+std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept {
+  auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  if (snapshot != INVALID_HANDLE_VALUE) {
+    auto entry = MODULEENTRY32{ .dwSize = sizeof(MODULEENTRY32) };
 
-        if (Module32First(snapshot, &entry)) {
-            do {
-                if (module_name == entry.szModule) {
-                    CloseHandle(snapshot);
-                    return reinterpret_cast<uint64_t>(entry.modBaseAddr) ;
-                }
-            } while (Module32Next(snapshot, &entry));
+    if (Module32First(snapshot, &entry)) {
+      do {
+        if (module_name == entry.szModule) {
+          CloseHandle(snapshot);
+          return reinterpret_cast<uint64_t>(entry.modBaseAddr) ;
         }
+      } while (Module32Next(snapshot, &entry));
     }
-    CloseHandle(snapshot);
-    return {};
+  }
+  CloseHandle(snapshot);
+  return {};
 }
 
 bool enable_privilege(LPCTSTR name) noexcept {
-    TOKEN_PRIVILEGES privilege{};
-    privilege.PrivilegeCount = 1;
-    privilege.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+  TOKEN_PRIVILEGES privilege{};
+  privilege.PrivilegeCount = 1;
+  privilege.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
 
-    if (!LookupPrivilegeValue(nullptr, name, &privilege.Privileges[0].Luid))
-        return false;
+  if (!LookupPrivilegeValue(nullptr, name, &privilege.Privileges[0].Luid))
+    return false;
 
-    HANDLE token{};
-    if (!OpenProcessToken(reinterpret_cast<HANDLE>(-1), TOKEN_ADJUST_PRIVILEGES, &token))
-        return false;
+  HANDLE token{};
+  if (!OpenProcessToken(reinterpret_cast<HANDLE>(-1), TOKEN_ADJUST_PRIVILEGES, &token))
+    return false;
 
-    if (!AdjustTokenPrivileges(token, FALSE, &privilege, sizeof(privilege), nullptr, nullptr)) {
-        CloseHandle(token);
-        return false;
-    }
-
+  if (!AdjustTokenPrivileges(token, FALSE, &privilege, sizeof(privilege), nullptr, nullptr)) {
     CloseHandle(token);
-    return true;
+    return false;
+  }
+
+  CloseHandle(token);
+  return true;
 }
 
 int main() try
@@ -328,6 +320,8 @@ int main() try
 
   ProgramOptions const options{
       constexpr Option{L"autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
+      constexpr Option{L"no-patching"sv, L"Force DWM to use WARP adapter instead of patching .rdata section. This is used as a "
+                       "fallback method by default in case the .rdata method fails."sv},
       constexpr Option{L"verbose"sv, L"Enables verbose output."sv},
       constexpr Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable."sv},
       constexpr Option{L"enable"sv, L"Always enables rounded corners."sv}
@@ -353,13 +347,7 @@ int main() try
   if (!dwm_process)
     throw std::runtime_error(std::format("Failed to open dwm.exe process, status: {:#x}!", GetLastError()));
 
-  verbose(std::format("Opened process handle {:#x} to dwm.exe.\nLocating CDesktopManager *g_pdmInstance:\n", reinterpret_cast<uint64_t>(dwm_process)));
-
-  auto const desktop_manager_rva = locate_udwm_desktop_manager();
-  if (!desktop_manager_rva)
-    throw std::runtime_error("Failed to locate g_pdmInstance RVA inside udwm.dll.");
-
-  verbose(std::format("Found g_pdmInstance at RVA {:#x}.\n", desktop_manager_rva.value()));
+  verbose(std::format("Opened process handle {:#x} to dwm.exe.\n", reinterpret_cast<uint64_t>(dwm_process)));
 
   auto const dwm_base = find_module_base(dwm_pid, std::string_view{"udwm.dll"});
   if (!dwm_base)
@@ -367,65 +355,83 @@ int main() try
 
   verbose(std::format("Found udwm.dll mapped at {:#x}.\n", dwm_base.value()));
 
-  auto desktop_manager_ptr = reinterpret_cast<void const *>(dwm_base.value() + desktop_manager_rva.value());
-  uint64_t desktop_manager_inst{};
-  SIZE_T out_size{};
-  if (!ReadProcessMemory(dwm_process, desktop_manager_ptr, &desktop_manager_inst, sizeof(void *), &out_size) || !desktop_manager_inst)
-    throw std::runtime_error(std::format("Failed to read value of g_pdmInstance from dwm.exe , status: {:#x}.\n", GetLastError()));
+  constexpr std::array boolean_values{"enabled"sv, "disabled"sv};
 
-  auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
-  verbose(std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst));
+  if (options[L"no-patching"sv].value) {
+    // non-patching method: forces DWM to use WARP adapter
+    auto const desktop_manager_rva = locate_udwm_desktop_manager();
+    if (!desktop_manager_rva) throw std::runtime_error("Failed to locate g_pdmInstance RVA inside udwm.dll.");
 
-  constexpr std::array boolean_values { "enabled"sv, "disabled"sv };
+    verbose(std::format("Found g_pdmInstance at RVA {:#x}.\n", desktop_manager_rva.value()));
 
-  if (!should_override_toggle) {
+    auto desktop_manager_ptr = reinterpret_cast<void const *>(dwm_base.value() + desktop_manager_rva.value());
+    uint64_t desktop_manager_inst{};
+    SIZE_T out_size{};
+    if (!ReadProcessMemory(dwm_process, desktop_manager_ptr, &desktop_manager_inst, sizeof(void *), &out_size) || !desktop_manager_inst)
+      throw std::runtime_error(std::format("Failed to read value of g_pdmInstance from dwm.exe , status: {:#x}.\n", GetLastError()));
+
+    auto desktop_manager = reinterpret_cast<desktop_manager_proto *>(desktop_manager_inst);
+    verbose(std::format("  g_pdmInstance = (CDesktopManager *){:#x};\n\n", desktop_manager_inst));
+
+    if (!should_override_toggle) {
+      out_size = {};
+      if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
+        throw std::runtime_error(std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError()));
+
+      verbose(std::format("Rounded corners were '{}', they are now being {}...\n", boolean_values[should_disable],
+                               boolean_values[(!should_disable)]));
+      should_disable ^= true;
+    } else {
+      verbose(std::format("Your rounded corners are being {}...\n", boolean_values[should_disable]));
+    }
+
     out_size = {};
-    if (!ReadProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
-      throw std::runtime_error(std::format("Failed to read 'enable_sharp_corners' from dwm.exe, status: {:#x}.\n", GetLastError()));
-
-    std::cout << std::format("Your rounded corners were '{}', they are now being {}... ",
-                             boolean_values[should_disable], boolean_values[(!should_disable)]);
-    should_disable ^= true;
+    if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
+      throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
   } else {
-    std::cout << std::format("Your rounded corners are being {}... ", boolean_values[should_disable]);
+    // TODO: Use non-patching method as backup (maybe put both methods in own function / class and wrap with try/catch)
+    // .rdata method: writes to floats related to rounding
+    auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
+
+    for (auto [original, ptr] : get_section<float>(udwm_dll, ".rdata")
+                                  | std::views::filter([](auto const &flt) {
+                                      return flt == 4.f || flt == 8.f;
+                                    })
+                                  | std::views::transform([=](float &flt) {
+                                      auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
+                                      auto rebased = reinterpret_cast<float *>(dwm_base.value() + rva);
+                                      return std::make_tuple(flt, rebased);
+                                    })) {
+      constexpr auto kNearZeroRadius = 0.001f;
+      float value{};
+      SIZE_T out_size{};
+
+      if (!ReadProcessMemory(dwm_process, ptr, &value, sizeof(float), &out_size) || out_size != sizeof(float))
+        throw std::runtime_error(std::format("Failed to read rounding float from dwm.exe, status: {:#x}.\n", GetLastError()));
+
+      auto const is_disabled = value == kNearZeroRadius;
+      auto const will_disable = should_override_toggle ? should_disable : !is_disabled;
+
+      auto const new_border_radius = will_disable ? kNearZeroRadius : original;
+      verbose(std::format("Writing {} to border radius {:#x}\n", new_border_radius, reinterpret_cast<ZyanU64>(ptr)));
+
+      DWORD old_protect{};
+      if (!VirtualProtectEx(dwm_process, ptr, sizeof(float), PAGE_READWRITE, &old_protect))
+        throw std::runtime_error(std::format("Failed to unprotect memory, last error: {}.\n", GetLastError()));
+
+      out_size = {};
+      if (!WriteProcessMemory(dwm_process, ptr, &new_border_radius, sizeof(float), &out_size) || out_size != sizeof(float))
+        throw std::runtime_error(std::format("Failed to write new border radius to dwm.exe, last error: {}.\n", GetLastError()));
+
+      if (!VirtualProtectEx(dwm_process, ptr, sizeof(float), old_protect, &old_protect))
+        throw std::runtime_error(std::format("Failed to protect memory, last error: {}.\n", GetLastError()));
+    }
   }
-
-  out_size = {};
-  if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
-    throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
-
-  auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
-
-  for (auto flt : get_section<float>(udwm_dll, ".rdata")
-                    | std::views::filter([](auto const &flt) {
-                        return flt == 4.f || flt == 8.f; })
-                    | std::views::transform([=](float &flt) {
-                        auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
-                        auto rebased = reinterpret_cast<float *>(dwm_base.value() + rva);
-                        return rebased;
-                      })) {
-    float const new_border_radius = 0.001f;
-    verbose(std::format("Writing {} to border radius {:#x}\n", new_border_radius, (ZyanU64)flt));
-
-    DWORD old_protect{};
-    if (!VirtualProtectEx(dwm_process, flt, 4, PAGE_READWRITE, &old_protect))
-      throw std::runtime_error(
-          std::format("Failed to unprotect memory, last error: {}.\n", GetLastError()));
-
-    out_size = {};
-    if (!WriteProcessMemory(dwm_process, flt, &new_border_radius, 4, &out_size) || out_size != 4)
-      throw std::runtime_error(
-          std::format("Failed to write new border radius to dwm.exe, last error: {}.\n", GetLastError()));
-
-    if (!VirtualProtectEx(dwm_process, flt, 4, old_protect, &old_protect))
-      throw std::runtime_error(
-          std::format("Failed to protect memory, last error: {}.\n", GetLastError()));
-  }
-
-  std::cout << "Success!\n";
 
   if (should_disable)
     std::cout << "Your Windows 11 experience is now enhanced!\n";
+  else
+    std::cout << "Your Windows 11 experience is now dehanced!\n";
 
   return 0;
 } catch (std::exception const &e) {
