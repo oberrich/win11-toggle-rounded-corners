@@ -410,9 +410,10 @@ int main() try
         throw std::runtime_error(std::format("Failed to read rounding float from dwm.exe, status: {:#x}.\n", GetLastError()));
 
       auto const is_disabled = value == kNearZeroRadius;
-      auto const will_disable = should_override_toggle ? should_disable : !is_disabled;
+      if (!should_override_toggle)
+        should_disable = !is_disabled;
 
-      auto const new_border_radius = will_disable ? kNearZeroRadius : original;
+      auto const new_border_radius = should_disable ? kNearZeroRadius : original;
       verbose(std::format("Writing {} to border radius {:#x}\n", new_border_radius, reinterpret_cast<ZyanU64>(ptr)));
 
       DWORD old_protect{};
