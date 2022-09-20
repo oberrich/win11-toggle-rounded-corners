@@ -397,7 +397,7 @@ int main() try
   auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
 
   for (auto flt : get_section<float>(udwm_dll, ".rdata")
-                    | std::views::filter([](auto &flt) -> bool {
+                    | std::views::filter([](auto const &flt) {
                         return flt == 4.f || flt == 8.f; })
                     | std::views::transform([=](float &flt) {
                         auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
