@@ -1,7 +1,7 @@
 # Win11 Toggle Rounded Corners
 A simple utility to disable window rounded corners on Windows 11
 
-<img src="https://i.imgur.com/P0JzxSp.png">  
+<img src="https://i.imgur.com/5HIQf7n.png">  
 
 **Download**
 
