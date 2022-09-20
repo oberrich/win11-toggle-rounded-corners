@@ -42,15 +42,14 @@ inline bool get_verbose() noexcept {
   return oberrich::detail::verbose_enabled;
 }
 
-template <typename... Args>
-inline void verbose(Args&&... args) {
+inline void verbose(auto&&...args) {
   if (get_verbose())
-    (std::cout << ... << args);
+    (std::cout << ... << std::forward<decltype(args)>(args));
 }
 
 template <std::size_t N>
 struct ProgramOptions {
-  ProgramOptions(auto&&...opts)
+  ProgramOptions(auto &&...opts)
     : argc{0}
     , argv{const_cast<decltype(argv)>(CommandLineToArgvW(GetCommandLineW(), &argc))}
     , command{argv[0]}
@@ -133,11 +132,10 @@ enum struct DecoderStatus : bool {
 
 struct Instruction : ZydisDecodedInstruction {
   DecoderStatus follow() {
-    if (ZyanU64 target{ calc_abs() })
+    if (auto target = calc_abs())
       address = target - length;
     else
       detail::enforce_status(ZYAN_STATUS_INVALID_ARGUMENT);
-
     return DecoderStatus::kNext;
   }
 
@@ -255,6 +253,39 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager()
     return static_cast<std::ptrdiff_t>(dyn_data.instance - reinterpret_cast<ZyanU64>(udwm_dll));
 }
 
+IMAGE_NT_HEADERS64 *image_nt_headers(void* base)
+{
+  if (!base)
+    return nullptr;
+
+  auto const dos_header = static_cast<IMAGE_DOS_HEADER *>(base);
+  if (dos_header->e_magic != IMAGE_DOS_SIGNATURE)
+    return nullptr;
+
+  auto nt_headers = reinterpret_cast<IMAGE_NT_HEADERS64 *>(static_cast<std::uint8_t *>(base) + dos_header->e_lfanew);
+  if (nt_headers->Signature != IMAGE_NT_SIGNATURE)
+    return nullptr;
+
+  return nt_headers;
+}
+
+template <typename T = uint8_t>
+std::span<T> get_section(void *base, std::string_view name)
+{
+  auto const nt_hdrs = image_nt_headers(base);
+
+  for (auto sec_header = IMAGE_FIRST_SECTION(nt_hdrs);
+       sec_header < IMAGE_FIRST_SECTION(nt_hdrs) + nt_hdrs->FileHeader.NumberOfSections;
+       sec_header++)
+  {
+    if (name == reinterpret_cast<char const *>(sec_header->Name)) {
+      return { reinterpret_cast<T *>(static_cast<uint8_t *>(base) + sec_header->VirtualAddress), sec_header->Misc.VirtualSize };
+    }
+  }
+
+  return {};
+}
+
 std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name) noexcept
 {
     auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
@@ -274,8 +305,7 @@ std::optional<uint64_t> find_module_base(DWORD pid, std::string_view module_name
     return {};
 }
 
-bool enable_privilege(LPCTSTR name) noexcept
-{
+bool enable_privilege(LPCTSTR name) noexcept {
     TOKEN_PRIVILEGES privilege{};
     privilege.PrivilegeCount = 1;
     privilege.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
@@ -287,7 +317,7 @@ bool enable_privilege(LPCTSTR name) noexcept
     if (!OpenProcessToken(reinterpret_cast<HANDLE>(-1), TOKEN_ADJUST_PRIVILEGES, &token))
         return false;
 
-    if (!AdjustTokenPrivileges(token, FALSE, &privilege, sizeof privilege, nullptr, nullptr)) {
+    if (!AdjustTokenPrivileges(token, FALSE, &privilege, sizeof(privilege), nullptr, nullptr)) {
         CloseHandle(token);
         return false;
     }
@@ -310,10 +340,10 @@ int main() try
   set_verbose(options[L"verbose"sv].value);
 
   auto should_disable = options[L"disable"sv].value;
-  auto should_override_toggle = should_disable || options[L"enable"sv].value;
+  auto const should_override_toggle = should_disable || options[L"enable"sv].value;
 
   if (!enable_privilege(SE_DEBUG_NAME))
-    throw std::runtime_error(std::format("Failed enable {}, make sure you are running as admin.", SE_DEBUG_NAME));
+    throw std::runtime_error(std::format("Failed to enable '{}', make sure you are running as admin.", SE_DEBUG_NAME));
 
   auto const dwm_hwnd = FindWindowA("Dwm", nullptr);
   DWORD dwm_pid = 0u;
@@ -367,6 +397,34 @@ int main() try
   out_size = {};
   if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
     throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
+
+  auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
+
+  for (auto flt : get_section<float>(udwm_dll, ".rdata")
+                                       | std::views::filter([](auto &flt) -> bool {
+                                            return flt == 4.f || flt == 8.f; })
+                                       | std::views::transform([=](float &flt) {
+                                           auto rva = reinterpret_cast<uint8_t *>(&flt) - reinterpret_cast<uint8_t *>(udwm_dll);
+                                           auto rebased = reinterpret_cast<float *>(dwm_base.value() + rva);
+                                           return rebased;
+                                         })) {
+    float const new_border_radius = 0.001f;
+    verbose(std::format("Writing {} to border radius {:#x}\n", new_border_radius, (ZyanU64)flt));
+
+    DWORD old_protect{};
+    if (!VirtualProtectEx(dwm_process, flt, 4, PAGE_READWRITE, &old_protect))
+      throw std::runtime_error(
+          std::format("Failed to unprotect memory, last error: {}.\n", GetLastError()));
+
+    out_size = {};
+    if (!WriteProcessMemory(dwm_process, flt, &new_border_radius, 4, &out_size) || out_size != 4)
+      throw std::runtime_error(
+          std::format("Failed to write new border radius to dwm.exe, last error: {}.\n", GetLastError()));
+
+    if (!VirtualProtectEx(dwm_process, flt, 4, old_protect, &old_protect))
+      throw std::runtime_error(
+          std::format("Failed to protect memory, last error: {}.\n", GetLastError()));
+  }
 
   std::cout << "Success!\n";
 
