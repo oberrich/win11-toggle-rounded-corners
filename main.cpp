@@ -100,11 +100,9 @@ struct ProgramOptions {
   void print_help() const {
     using namespace std::string_view_literals;
     std::wcout << std::format(L"{} [options]\nOptions:\n"sv, program_name);
-
     for (auto const &option : options)
       std::wcout << std::format(L"  --{: <20}: {}\n"sv, option.name, option.desc);
-
-    std::exit(0);
+    std::wcout << L'\n';
   }
 
   int argc;
@@ -430,7 +428,6 @@ int main() try
     }
   }
 
-  // TODO: Fix for auto-toggle behavior
   if (should_disable)
     std::cout << "Your Windows 11 experience is now enhanced!\n";
   else
