@@ -320,6 +320,7 @@ int main() try
   using namespace std::string_view_literals;
 
   ProgramOptions const options{
+      // TODO: Implement --autostart
       constexpr Option{L"autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
       constexpr Option{L"no-patching"sv, L"Force DWM to use WARP adapter instead of patching .rdata section. This is used as a "
                        "fallback method by default in case the .rdata method fails."sv},
@@ -429,6 +430,7 @@ int main() try
     }
   }
 
+  // TODO: Fix for auto-toggle behavior
   if (should_disable)
     std::cout << "Your Windows 11 experience is now enhanced!\n";
   else
