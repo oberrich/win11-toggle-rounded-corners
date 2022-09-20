@@ -81,7 +81,7 @@ struct ProgramOptions {
 
     std::wcout << std::format(L"{} {}\nCopyright (C) {} {}, {}\n\n"sv, program_name_friendly, version, copyright_year, author, license);
 
-    if (decltype(auto) self = std::as_const(*this); self[L"help"sv].value)
+    if (std::as_const(*this)[L"help"sv].value)
       print_help();
   }
 
