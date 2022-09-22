@@ -151,13 +151,16 @@ struct Instruction : ZydisDecodedInstruction {
   ZyanU64 address;
 };
 
+template <typename T>
+concept DecoderCallback = std::invocable<T, Instruction &> &&
+                          std::convertible_to<std::invoke_result_t<T, Instruction &>, DecoderStatus>;
+
 struct Decoder : ZydisDecoder {
   Decoder() {
     detail::enforce_status(ZydisDecoderInit(this, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64));
   }
 
-  template <typename T = void>
-  void disassemble(ZyanU64 address, std::invocable<Instruction &> auto &&callback) {
+  void disassemble(ZyanU64 address, DecoderCallback auto &&callback) {
     Instruction instrn{};
     instrn.address = address;
 
@@ -222,7 +225,7 @@ std::optional<std::ptrdiff_t> locate_udwm_desktop_manager() {
 
   Formatter formatter{};
   Decoder decoder{};
-  decoder.disassemble(dwm_client_startup, [&formatter, &dyn_data](Instruction &instrn) {
+  decoder.disassemble(dwm_client_startup, [&formatter, &dyn_data](Instruction &instrn) -> DecoderStatus {
     if (instrn.mnemonic == ZYDIS_MNEMONIC_RET)
       throw std::out_of_range("Failed to disasm: Reached end of function");
 
