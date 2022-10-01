@@ -1,30 +1,25 @@
 #include <array>
 #include <algorithm>
-#include <functional>
+#include <cinttypes>
+#include <concepts>
+#include <cstdio>
 #include <format>
+#include <functional>
 #include <iostream>
 #include <optional>
-#include <string_view>
 #include <ranges>
-#include <concepts>
-#include <optional>
-#include <source_location>
-
-#include <cstdio>
-#include <cinttypes>
+#include <string_view>
 
 #include <windows.h>
 #include <tlhelp32.h>
 
-#include <Zydis/Zydis.h>
-
-#include <format>
-#include <concepts>
+#include "Zydis/Zydis.h"
+#include "llvm_56379_workaround.h"
 
 struct Option {
-  std::wstring_view name;
-  std::wstring_view desc;
-  bool value;
+  std::wstring_view name{};
+  std::wstring_view desc{};
+  bool value{};
 };
 
 namespace oberrich::detail {
@@ -116,7 +111,7 @@ template <typename... Options>
 ProgramOptions(Options...) -> ProgramOptions<sizeof...(Options) + 1>;
 
 namespace detail {
-static inline bool enforce_status(ZyanStatus status, const std::source_location location = std::source_location::current()) {
+static inline bool assert_status(ZyanStatus status, const std::source_location location = std::source_location::current()) {
   if (ZYAN_FAILED(status))
     throw std::runtime_error(std::format("{}({}): assertion failed with status {:#x}",
                                          location.file_name(), location.line(), status));
@@ -134,16 +129,16 @@ struct Instruction : ZydisDecodedInstruction {
     if (auto target = calc_abs())
       address = target - length;
     else
-      detail::enforce_status(ZYAN_STATUS_INVALID_ARGUMENT);
+      detail::assert_status(ZYAN_STATUS_INVALID_ARGUMENT);
     return DecoderStatus::kNext;
   }
 
   ZyanU64 calc_abs(std::size_t n = 0u) {
     if (n >= ZYDIS_MAX_OPERAND_COUNT_VISIBLE)
-      detail::enforce_status(ZYAN_STATUS_INVALID_ARGUMENT);
+      detail::assert_status(ZYAN_STATUS_INVALID_ARGUMENT);
 
     ZyanU64 absolute{};
-    detail::enforce_status(ZydisCalcAbsoluteAddress(this, &operands[n], address, &absolute));
+    detail::assert_status(ZydisCalcAbsoluteAddress(this, &operands[n], address, &absolute));
     return absolute;
   };
 
@@ -157,14 +152,14 @@ concept DecoderCallback = std::invocable<T, Instruction &> &&
 
 struct Decoder : ZydisDecoder {
   Decoder() {
-    detail::enforce_status(ZydisDecoderInit(this, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64));
+    detail::assert_status(ZydisDecoderInit(this, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64));
   }
 
   void disassemble(ZyanU64 address, DecoderCallback auto &&callback) {
     Instruction instrn{};
     instrn.address = address;
 
-    while (detail::enforce_status(ZydisDecoderDecodeFull(this, reinterpret_cast<ZyanU8 const *>(instrn.address), 32, &instrn, instrn.operands,
+    while (detail::assert_status(ZydisDecoderDecodeFull(this, reinterpret_cast<ZyanU8 const *>(instrn.address), 32, &instrn, instrn.operands,
                                                          ZYDIS_MAX_OPERAND_COUNT_VISIBLE, ZYDIS_DFLAG_VISIBLE_OPERANDS_ONLY))) {
       if (callback(instrn) == DecoderStatus::kDone)
         return;
@@ -176,8 +171,8 @@ struct Decoder : ZydisDecoder {
 
 struct Formatter : ZydisFormatter {
   Formatter() noexcept {
-    detail::enforce_status(ZydisFormatterInit(this, ZYDIS_FORMATTER_STYLE_INTEL));
-    detail::enforce_status(ZydisFormatterSetProperty(this, ZYDIS_FORMATTER_PROP_IMM_SIGNEDNESS, ZYDIS_SIGNEDNESS_AUTO));
+    detail::assert_status(ZydisFormatterInit(this, ZYDIS_FORMATTER_STYLE_INTEL));
+    detail::assert_status(ZydisFormatterSetProperty(this, ZYDIS_FORMATTER_PROP_IMM_SIGNEDNESS, ZYDIS_SIGNEDNESS_AUTO));
   }
 
   std::string_view operator()(ZydisInstructionCategory const category)  const noexcept { return { ZydisCategoryGetString(category)  }; }
@@ -321,13 +316,13 @@ int main() try
   using namespace std::string_view_literals;
 
   ProgramOptions const options{
-      // TODO: Implement --autostart
-      constexpr Option{L"autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
-      constexpr Option{L"no-patching"sv, L"Force DWM to use WARP adapter instead of patching .rdata section. This is used as a "
+      // TODO: Implement --no-autostart
+      Option{L"no-autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
+      Option{L"no-patching"sv, L"Force DWM to use WARP adapter instead of patching .rdata section. This is used as a "
                        "fallback method by default in case the .rdata method fails."sv},
-      constexpr Option{L"verbose"sv, L"Enables verbose output."sv},
-      constexpr Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable."sv},
-      constexpr Option{L"enable"sv, L"Always enables rounded corners."sv}
+      Option{L"verbose"sv, L"Enables verbose output."sv},
+      Option{L"disable"sv, L"Always disables rounded corners. Has precedence over --enable."sv},
+      Option{L"enable"sv, L"Always enables rounded corners."sv}
   };
 
   set_verbose(options[L"verbose"sv].value);
