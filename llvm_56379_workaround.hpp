@@ -35,7 +35,7 @@ class source_location {
   }
 
   [[nodiscard]] constexpr std::uint_least32_t column() const noexcept {
-    return _M_impl._M_line;
+    return _M_impl._M_column;
   }
 
   [[nodiscard]] constexpr std::uint_least32_t line() const noexcept {
