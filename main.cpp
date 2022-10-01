@@ -14,7 +14,7 @@
 #include <tlhelp32.h>
 
 #include "Zydis/Zydis.h"
-#include "llvm_56379_workaround.h"
+#include "llvm_56379_workaround.hpp"
 
 struct Option {
   std::wstring_view name{};
