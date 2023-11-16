@@ -37,47 +37,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Place any regular files here
 Source: "LICENSE"; DestDir: "{app}";
 ; These files will be downloaded
-Source: "{tmp}\win11-toggle-rounded-corners.exe"; DestDir: "{app}"; Flags: external
-
-[Code]
-var
-  DownloadPage: TDownloadWizardPage;
-
-function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
-begin
-  if Progress = ProgressMax then
-    Log(Format('Successfully downloaded file to {tmp}: %s', [FileName]));
-  Result := True;
-end;
-
-procedure InitializeWizard;
-begin
-  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), @OnDownloadProgress);
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  if CurPageID = wpReady then begin
-    DownloadPage.Clear;
-    DownloadPage.Add('https://github.com/oberrich/win11-toggle-rounded-corners/releases/latest/download/win11-toggle-rounded-corners.exe', 'win11-toggle-rounded-corners.exe', '');
-    DownloadPage.Show;
-    try
-      try
-        DownloadPage.Download; // This downloads the files to {tmp}
-        Result := True;
-      except
-        if DownloadPage.AbortedByUser then
-          Log('Aborted by user.')
-        else
-          SuppressibleMsgBox(AddPeriod(GetExceptionMessage), mbCriticalError, MB_OK, IDOK);
-        Result := False;
-      end;
-    finally
-      DownloadPage.Hide;
-    end;
-  end else
-    Result := True;
-end;
+Source: "build\win11-toggle-rounded-corners.exe"; DestDir: "{app}"
 
 [Run]
 Filename: "schtasks"; \
