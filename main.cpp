@@ -336,7 +336,7 @@ int main() try
   if (!enable_privilege(SE_DEBUG_NAME))
     throw std::runtime_error(std::format("Failed to enable '{}', make sure you are running as admin.", SE_DEBUG_NAME));
 
-  DWORD dwm_pid = 0u;
+  DWORD dwm_pid{};
 
   for (auto first_attempt_at = clock::now(); clock::now() - first_attempt_at < 5s; std::this_thread::sleep_for(250ms)) {
     if (auto const dwm_hwnd = FindWindowA("Dwm", nullptr); dwm_hwnd && GetWindowThreadProcessId(dwm_hwnd, &dwm_pid))
