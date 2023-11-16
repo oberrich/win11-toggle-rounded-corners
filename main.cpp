@@ -329,8 +329,7 @@ int main() try
   };
 
   set_verbose(options[L"verbose"sv].value);
-
-      detail::assert_status(ZYAN_STATUS_INVALID_ARGUMENT);
+  
   auto should_disable = options[L"disable"sv].value;
   auto const should_override_toggle = should_disable || options[L"enable"sv].value;
 
