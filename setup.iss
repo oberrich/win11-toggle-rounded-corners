@@ -36,7 +36,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 ; Place any regular files here
 Source: "LICENSE"; DestDir: "{app}";
-; These files will be downloaded
 Source: "build\win11-toggle-rounded-corners.exe"; DestDir: "{app}"
 
 [Run]
