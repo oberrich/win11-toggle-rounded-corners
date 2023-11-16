@@ -1,5 +1,5 @@
 project('win11-toggle-rounded-corners', ['c', 'cpp'],
-  version : '1.1',
+  version : '1.2',
   default_options : [
     'cpp_std=c++latest',
     'buildtype=release',

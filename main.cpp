@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <concepts>
+#include <chrono>
 #include <cstdio>
 #include <format>
 #include <functional>
@@ -9,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <string_view>
+#include <thread>
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -69,9 +71,9 @@ struct ProgramOptions {
     }
 
     constexpr std::wstring_view program_name_friendly{L"Win11 Toggle Rounded Corners"sv};
-    constexpr std::wstring_view version              {L"v1.1"sv};
+    constexpr std::wstring_view version              {L"v1.2"sv};
     constexpr std::wstring_view license              {L"MIT License"};
-    constexpr std::wstring_view copyright_year       {L"2022"sv};
+    constexpr std::wstring_view copyright_year       {L"2023"sv};
     constexpr std::wstring_view author               {L"oberrich"sv};
 
     std::wcout << std::format(L"{} {}\nCopyright (C) {} {}, {}\n\n"sv, program_name_friendly, version, copyright_year, author, license);
@@ -314,10 +316,11 @@ bool enable_privilege(LPCTSTR name) noexcept {
 int main() try
 {
   using namespace std::string_view_literals;
+  using namespace std::chrono_literals;
+
+  using clock = std::chrono::steady_clock;
 
   ProgramOptions const options{
-      // TODO: Implement --no-autostart
-      Option{L"no-autostart"sv, L"Puts the program into auto-start with the currently specified options. NOT IMPLEMENTED"sv},
       Option{L"no-patching"sv, L"Force DWM to use WARP adapter instead of patching .rdata section. This is used as a "
                        "fallback method by default in case the .rdata method fails."sv},
       Option{L"verbose"sv, L"Enables verbose output."sv},
@@ -327,19 +330,24 @@ int main() try
 
   set_verbose(options[L"verbose"sv].value);
 
+      detail::assert_status(ZYAN_STATUS_INVALID_ARGUMENT);
   auto should_disable = options[L"disable"sv].value;
   auto const should_override_toggle = should_disable || options[L"enable"sv].value;
 
   if (!enable_privilege(SE_DEBUG_NAME))
     throw std::runtime_error(std::format("Failed to enable '{}', make sure you are running as admin.", SE_DEBUG_NAME));
 
-  auto const dwm_hwnd = FindWindowA("Dwm", nullptr);
   DWORD dwm_pid = 0u;
 
-  if (!dwm_hwnd || !GetWindowThreadProcessId(dwm_hwnd, &dwm_pid))
+  for (auto first_attempt_at = clock::now(); clock::now() - first_attempt_at < 5s; std::this_thread::sleep_for(250ms)) {
+    if (auto const dwm_hwnd = FindWindowA("Dwm", nullptr); dwm_hwnd && GetWindowThreadProcessId(dwm_hwnd, &dwm_pid))
+      break;
+  }
+
+  if (!dwm_pid)
     throw std::runtime_error("Failed to find dwm process.\n");
 
-  verbose(std::format("Found dwm.exe process [window handle: {}, pid: {}].\n", static_cast<void *>(dwm_hwnd), dwm_pid));
+  verbose(std::format("Found dwm.exe process, pid: {}.\n", dwm_pid));
 
   auto const dwm_process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, dwm_pid);
   if (!dwm_process)
@@ -387,7 +395,6 @@ int main() try
     if (!WriteProcessMemory(dwm_process, &desktop_manager->enable_sharp_corners, &should_disable, 1, &out_size) || out_size != 1)
       throw std::runtime_error(std::format("Failed to write 'enable_sharp_corners' to dwm.exe, status: {:#x}.\n", GetLastError()));
   } else {
-    // TODO: Use non-patching method as backup (maybe put both methods in own function / class and wrap with try/catch)
     // .rdata method: writes to floats related to rounding
     auto udwm_dll = LoadLibraryExA("udwm.dll", nullptr, DONT_RESOLVE_DLL_REFERENCES);
 
