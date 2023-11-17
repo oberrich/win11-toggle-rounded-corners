@@ -5,7 +5,8 @@ A simple utility to disable window rounded corners on Windows 11
 
 **Download**
 
-An installer as well as the standalone binary for portable use can be [**downloaded here**](https://github.com/oberrich/win11-toggle-rounded-corners/releases)
+An installer as well as the standalone binary for portable use can be [**downloaded here**](https://github.com/oberrich/win11-toggle-rounded-corners/releases).
+
 The program requires **administrator** privileges. *(Some Anti-Virus products may potentially block the access to `dwm.exe`)*. 
 
 **Build**
