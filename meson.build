@@ -37,5 +37,5 @@ zydis_depends = zydis_proj.dependency('Zydis')
 executable('win11-toggle-rounded-corners',
            'main.cpp',
            dependencies: [zydis_depends],
-           cpp_args: ['/W4', '/MT', '/permissive-'],
-           link_args: ['/EMITPOGOPHASEINFO', '/DEBUG:NONE', '/ASSEMBLYDEBUG:DISABLE', '/OPT:NOREF', '/LTCG'])
+           cpp_args: ['/W4', '/MT', '/permissive-', '/Brepro'],
+           link_args: ['/EMITPOGOPHASEINFO', '/DEBUG:NONE', '/ASSEMBLYDEBUG:DISABLE', '/OPT:NOREF', '/LTCG', '/Brepro', '/pdbaltpath:%_PDB%'])
