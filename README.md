@@ -1,7 +1,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/oberrich/win11-toggle-rounded-corners/total.svg)](https://github.com/oberrich/win11-toggle-rounded-corners/releases)
 
 # Win11 Toggle Rounded Corners
-A simple utility to disable window rounded corners on Windows 11
+A simple utility to disable rounded window corners on Windows 11
 
 <img src="https://i.imgur.com/5HIQf7n.png">  
 
